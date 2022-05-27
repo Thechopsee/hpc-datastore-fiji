@@ -11,7 +11,12 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
+import cz.it4i.fiji.legacy.util.Imglib2Types;
+import net.imagej.Dataset;
+import net.imagej.ImgPlus;
+import net.imglib2.type.numeric.RealType;
 import org.scijava.ItemIO;
+import org.scijava.ItemVisibility;
 import org.scijava.command.Command;
 import org.scijava.command.CommandInfo;
 import org.scijava.command.CommandModule;
@@ -23,26 +28,36 @@ import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
 
 import cz.it4i.fiji.legacy.util.GuiResolutionLevelParams;
-import cz.it4i.fiji.legacy.util.Imglib2Types;
 import cz.it4i.fiji.rest.util.DatasetInfo;
 
-@Plugin(type = Command.class, headless = true, menuPath = "Plugins>HPC DataStore>Create>Create new dataset")
-public class CreateNewDataset implements Command {
+@Plugin(type = Command.class, headless = true, menuPath = "Plugins>HPC DataStore>Create>Create new dataset from current image")
+public class CreateNewDatasetFromImage implements Command {
 	@Parameter(label = "URL of a DatasetsRegisterService:", persistKey = "datasetserverurl")
 	public String url = "someHostname:9080";
 
 	@Parameter(label="Dataset label:")
 	public String label = "provide some nickname of this dataset";
 
-	@Parameter(label = "Voxel type:", choices = {"uint8", "uint16", "uint32", "uint64","int8", "int16", "int32", "int64", "float32", "float64"})
-	public String voxelType;
+	@Parameter(label="Voxel type:", visibility = ItemVisibility.MESSAGE, required = false, persist = false)
+	String voxelType;
 
-	@Parameter(label = "Full-resolution image size x:", min = "1")
-	public int fullResSizeX;
-	@Parameter(label = "Full-resolution image size y:", min = "1")
-	public int fullResSizeY;
-	@Parameter(label = "Full-resolution image size z:", min = "1")
-	public int fullResSizeZ;
+	int fullResSizeX;
+	int fullResSizeY;
+	int fullResSizeZ;
+
+	void readParams() {
+		voxelType = Imglib2Types.getTypeHandler(refDatasetImg.getType()).httpType;
+		fullResSizeX = (int)refDatasetImg.dimension(0);
+		fullResSizeY = (int)refDatasetImg.dimension(1);
+		fullResSizeZ = refDatasetImg.numDimensions() > 2 ? (int)refDatasetImg.dimension(2) : 1;
+
+		final ImgPlus<?> ip = refDatasetImg.getImgPlus();
+		res_unit = ip.axis(0).unit();
+		res_x = ip.axis(0).calibratedValue(1);
+		res_y = ip.axis(1).calibratedValue(1);
+		if (refDatasetImg.numDimensions() > 2)
+			res_z = ip.axis(2).calibratedValue(1);
+	}
 
 	@Parameter(label = "Total number of time points:", min = "1")
 	public int timepoints = 1;
@@ -51,14 +66,14 @@ public class CreateNewDataset implements Command {
 	@Parameter(label = "Total number of view angles:", min = "1")
 	public int angles = 1;
 
-	@Parameter(label = "Physical dimension of one voxel in x:", min = "0")
-	public double res_x = 1.0;
+	@Parameter(label = "Physical dimension of one voxel in x:", min = "0", initializer = "readParams")
+	public double res_x;
 	@Parameter(label = "Physical dimension of one voxel in y:", min = "0")
-	public double res_y = 1.0;
+	public double res_y;
 	@Parameter(label = "Physical dimension of one voxel in z:", min = "0")
-	public double res_z = 1.0;
+	public double res_z;
 	@Parameter(label = "Physical unit of the voxel dimension:", description = "microns")
-	public String res_unit = "microns";
+	public String res_unit;
 
 	@Parameter(label = "Time period between successive time points:", min = "0")
 	public double time_res = 1.0;
@@ -81,6 +96,9 @@ public class CreateNewDataset implements Command {
 
 	@Parameter(label = "Compression of the stored data:", choices = { "none", "gzip" })
 	public String compression = "gzip";
+
+	@Parameter
+	public Dataset refDatasetImg;
 
 	@Parameter
 	public CommandService cs;
@@ -126,7 +144,6 @@ public class CreateNewDataset implements Command {
 		final Map<String,Object> rldlg_presets = new HashMap<>(5);
 		rldlg_presets.put("pxSizeInBytes", ((Imglib2Types.TypeHandler<?>)Imglib2Types
 				.getTypeHandler(voxelType)).nativeAndRealType.getBitsPerPixel()/8);
-
 		try {
 			for (int levelCnt = 1; levelCnt <= numberOfAllResLevels; ++levelCnt) {
 				rldlg_presets.put("resLevelNumber", levelCnt);
